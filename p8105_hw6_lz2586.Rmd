@@ -6,3 +6,25 @@ output:
   github_document:
     toc: true
 ---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(rvest)
+library(httr)
+
+```
+
+
+
+### problem 1
+
+```{r}
+
+homicide <- GET('https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv') %>% 
+  content('parsed')
+
+
+
+
+```
+
