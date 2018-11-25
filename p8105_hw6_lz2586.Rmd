@@ -1,0 +1,8 @@
+---
+title: "P8105_hw6_lz2586"
+author: "Lyuou Zhang"
+date: "11/25/2018"
+output: 
+  github_document:
+    toc: true
+---
