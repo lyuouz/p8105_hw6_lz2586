@@ -9,9 +9,8 @@ output:
 
 ```{r setup, include = FALSE}
 library(tidyverse)
-library(rvest)
-library(httr)
 
+library(modelr)
 ```
 
 
@@ -143,7 +142,46 @@ birthwt <- read_csv('./data/birthweight.csv') %>%
     mrace = as.factor(mrace)
   )
 
-birthlm <- lm()
+# checking missing variable
+skimr::skim(birthwt)
+# no missing variable
+
+```
+
+Model building: literature shows that factors that impact birth weight include mother's race, mother's age, prenatal care, nutrition and smoking. Smoking is associated with adverse pregnancy outcomes because smoking during pregnancy harms both the mother and the baby. Prenatal smoking is thought to account for 20~30% of cases of low birth weight.
+
+Gestational age, demographic variables should also be controlled for. Considering other biological and social factors that might be indicators or confounders, the variables to be used in the model are: babysex, bhead, blength, delwt, gaweeks, menarche, momage, mrace, pnumlbw, smoken
+
+```{r}
+
+birthlm <- lm(bwt ~ babysex + bhead + blength + delwt + momage + gaweeks + menarche +  mrace + smoken, data = birthwt)
+
+birthlm %>% 
+  broom::tidy()
+
+birthlm %>% 
+  broom::glance()
+
+# add predictions and residuals
+birthwt <- modelr::add_residuals(birthwt, birthlm)
+birthwt <- modelr::add_predictions(birthwt, birthlm)
+birthwt <- birthwt %>% 
+  rename(res_1 = resid,
+         pd_1 = pred)
+
+# residuals vs. predictions
+birthwt %>% 
+  ggplot(aes(x = pred, y = resid)) + geom_point() +
+  geom_smooth(se = FALSE)
+
+```
+
+Alternative model 1
+
+```{r}
+model2 <- lm(bwt ~ blength + gaweeks, data = birthwt)
+
+model2 
 
 
 
