@@ -16,15 +16,143 @@ library(httr)
 
 
 
-### problem 1
+## problem 1
+
+### data cleaning and create variables
+
+```{r}
+homicide <- read_csv('./data/homicide-data.csv') %>% 
+  janitor::clean_names() %>% 
+  mutate(
+    city_state = str_c(city, state, sep = ', ')
+  ) %>% 
+  filter(city_state != 'Dallas, TX' & city_state != 'Phoenix, AZ' & city_state != 'Kansas City, MO' & city_state != 'Tulsa, AL') %>% 
+  mutate(
+    victim_age = as.numeric(victim_age),
+    resolved = as.numeric(disposition == "Closed by arrest"),
+    victim_race = ifelse(victim_race == 'White', 'white', 'non-white'),
+    victim_race = as.factor(victim_race),
+    victim_race = relevel(victim_race, ref = 'white'),
+    victim_sex = fct_relevel(victim_sex, ref = 'Male')
+  )
+```
+
+
+  
+* Created new variables:  
+  + `city_state`: combines city and state  
+  + `resolved`: 1 = resolved ('Closed by arrest'), 0 = unresolved  
+  + `race_cate`: race categorized as `white` and `non-white`, using `white` as the reference
+* Filtered cities with no race data  
+
+### Logistic model for Baltimore
+
+A data frame for `Baltimore`
+
+```{r}
+baltimore <- homicide %>% 
+  filter(city == 'Baltimore')
+
+
+```
+
+logistic model for Baltimore
 
 ```{r}
 
-homicide <- GET('https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv') %>% 
-  content('parsed')
+logistic_baltimore <- baltimore %>% 
+  glm(resolved ~ victim_age + victim_sex + victim_race, data = .,, family = binomial())
 
+```
+
+```{r}
+
+baltimore_results <- logistic_baltimore %>% 
+  broom::tidy() %>% 
+  mutate(OR = exp(estimate),
+         conf_low = estimate - 1.96 * std.error,
+         conf_high = estimate + 1.96 * std.error,
+         OR_low = exp(conf_low),
+         OR_high = exp(conf_high))
+
+baltimore_results %>% 
+  select(term, log_OR = estimate, OR, OR_low, OR_high) %>% 
+  knitr::kable()
+
+```
+
+For Baltimore, the OR for non-white victim vs. white victim is 0.441. The confidence interval of the adjusted OR is (0.313, 0.620).
+
+```{r}
+
+logistic_function <- function(df){
+  
+  model = glm(resolved ~ victim_age + victim_race + victim_sex, data = df, family = binomial())
+  
+  tidy_results = model %>% broom::tidy() %>% 
+    filter(term == 'victim_racenon-white') %>% 
+    mutate(
+      OR = exp(estimate),
+        conf_low = estimate - 1.96 * std.error,
+        conf_high = estimate + 1.96 * std.error,
+        OR_low = exp(conf_low),
+        OR_high = exp(conf_high)
+    ) 
+  
+  tidy_results
+}
+
+homicide_nest <- homicide %>% 
+  select(city_state, resolved, victim_age, victim_sex, victim_race) %>% 
+  group_by(city_state) %>%
+  nest()
+
+
+homicide_model_results <- homicide_nest %>% 
+  mutate(
+    logistic_results = map(homicide_nest$data, logistic_function)
+  ) %>% 
+  select(-data) %>% 
+  unnest()
+
+```
+
+The plots
+
+```{r}
+
+homicide_model_results %>%
+  mutate(city_state = fct_reorder(city_state, OR)) %>% 
+  ggplot(aes(x = city_state, y = OR)) + geom_point() +
+  geom_errorbar(aes(ymin = OR_low, ymax = OR_high)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+
+This figure shows that
+
+## Problem 2
+
+```{r}
+birthwt <- read_csv('./data/birthweight.csv') %>% 
+  mutate(
+    babysex = as.factor(babysex),
+    frace = as.factor(frace),
+    malform = as.factor(malform),
+    mrace = as.factor(mrace)
+  )
+
+birthlm <- lm()
 
 
 
 ```
+
+
+
+
+
+
+
 
