@@ -10,6 +10,7 @@ output:
 ```{r setup, include = FALSE}
 library(tidyverse)
 library(modelr)
+library(ggcorrplot)
 ```
 
 
@@ -57,11 +58,11 @@ homicide %>%
   filter(victim_sex == 'Unknown')
 ```
 
-There are 560 rows whose victim_sex are missing. The dataset has `nrow(homicide)` rows in total, so there are not a lot of missing data points. I'll leave it alone for now, which means I'll be using "Unknown" as a gender category in the regression.
+There are 560 rows whose victim_sex are missing. The dataset has `r nrow(homicide)` rows in total, so there are not a lot of missing data points. I'll leave it alone for now, which means I'll be using "Unknown" as a gender category in the regression.
 
 ### Logistic model for Baltimore
 
-Filter `homicide` to get the data frame for `Baltimore`
+Filter `homicide` to get the data frame for Baltimore, MD
 
 ```{r}
 baltimore <- homicide %>% 
@@ -99,7 +100,7 @@ baltimore_results %>%
 
 The confidence intervals are computed using `mean + SE*1.96` or `mean - SE*1.96`. For Baltimore, the OR for non-white victim vs. white victim is 0.441. The confidence interval of the adjusted OR is (0.313, 0.620).  
 
-### Logistic regression for all the cities in the dataset
+### Logistic regression for all the cities
 
 I'm going to write a function that wraps up model building, tidying results and computing OR and confidence intervals.
 
@@ -123,7 +124,7 @@ logistic_function <- function(df){
 }
 ```
 
-I'll be using list columns with `nest()` because here `purrr::map` should work with the "sub" datasets for each `city_state`.
+I'll be using list columns with `nest()` because here `purrr::map` should work with "sub" datasets of each city_state.
 
 ```{r}
 homicide_nest <- homicide %>% 
@@ -132,7 +133,7 @@ homicide_nest <- homicide %>%
   nest()
 ```
 
-Using `map` to apply the function `logistic_function` to each city_state and 
+Using `map` to apply the function `logistic_function` to each city_state
 
 ```{r}
 # applying function using map
@@ -162,7 +163,10 @@ This figure shows that the city with the smallest estimated OR is Boston, MA, an
 
 ## Problem 2
 
+Data import, cleaning and checking missing variables
+
 ```{r}
+# data import and cleaning
 birthwt <- read_csv('./data/birthweight.csv') %>% 
   mutate(
     babysex = as.factor(babysex),
@@ -177,15 +181,42 @@ skimr::skim(birthwt)
 
 ```
 
-Model building: literature shows that factors that impact birth weight include mother's race, mother's age, prenatal care, nutrition and smoking. Smoking is associated with adverse pregnancy outcomes because smoking during pregnancy harms both the mother and the baby. Prenatal smoking is thought to account for 20~30% of cases of low birth weight.
+### Model building
 
-Gestational age, demographic variables should also be controlled for. Considering other biological and social factors that might be indicators or confounders, the variables to be used in the model are: babysex, bhead, blength, delwt, gaweeks, menarche, momage, mrace, pnumlbw, smoken  
+Model building: Here are the things that I considered when I picked the indicators:
 
-Also use a correlation heatmap to see what variables are most correlated with birth weight
+* literature shows that factors in this dataset that can affect birth weight include mother's race, mother's age, prenatal care, nutrition and smoking.  
 
+* Babysex, head circumference, baby's leangth at birth are related to baby's "size". It makes sense that they are related to baby's weight.  
+
+* As the baby's age grows, his or her weight will also grow. So gestational age might be related to birth weight too.  
+
+* There is no variable that shows if the mom had access to prenatal care or her nutrition status. However, mom's race could be related to if she has access to healthcare, and her financial status which could further be related to her nutrition status.  
+
+* For mom's age, there is evidence showing that the incidence of low birthweight is higher for mother under 18 or above 35. The range of mom's age in this dataset is `r range(birthwt$momage)`. So the relationship between mom's age and birth weight is probably not a linear one. I include mom's age because I want to see what the relationship will look like.  
+
+* Smoking is associated with adverse pregnancy outcomes because smoking during pregnancy harms both the mother and the baby. Prenatal smoking is thought to account for 20~30% of cases of low birth weight.
+
+Considering other biological and social factors that might be indicators or confounders, the variables to be used in the model are: babysex, bhead, blength, delwt, gaweeks, menarche, momage, mrace, and smoken  
+
+To take a look at the correlations between variables, I can also create a correlation heatmap. However, this only works for numeric variables.
 
 ```{r}
+# subset the data to only contain numeric variables:
+# because pnumlbw and pnumsga are all 0, there's no need to include them
+birthwt_num <- birthwt %>% 
+  select_if(is.numeric) %>% 
+  select(-pnumlbw, -pnumsga)
 
+corr_wt <- round(cor(birthwt_num), 3)
+ggcorrplot(corr_wt)
+
+```
+
+`blength` and `bhead` and `gaweeks` are positively correlated with birth weight. `smoken` is negatively correlated with birth weight.
+
+```{r}
+# model building
 birthlm <- lm(bwt ~ babysex + bhead + blength + delwt + momage + gaweeks + menarche +  mrace + smoken, data = birthwt)
 
 birthlm %>% 
@@ -193,19 +224,35 @@ birthlm %>%
 
 birthlm %>% 
   broom::glance()
+```
 
+From the results:  
+
+* R2 = 0.714, which means about 71% of birth weight are explained by this model.  
+
+* `babysex`, `bhead`, `blength`, `delwt`, `gaweeks`, `mrace2` (black), `mrace4` (Puerto Rican) and smoken are significantly associated with birth weight. Among these variables:  
+  + `babysex` (female vs. male), `bhead`, `blength`, `delwt` and `gasweeks` are positively associated with birth weight.  
+  + `mrace2` (black), `mrace4` (Puerto Rican) and smoken are negatively associated with birth weight.  
+  + Asian is the only race that is not associated with birth weight.
+
+The plot of predicted values vs. residuals.
+
+```{r}
 # add predictions and residuals
 birthwt <- modelr::add_residuals(birthwt, birthlm)
 birthwt <- modelr::add_predictions(birthwt, birthlm)
 
-# residuals vs. predictions
+# residuals vs. predictions plot
 birthwt %>% 
   ggplot(aes(x = pred, y = resid)) + geom_point() +
   geom_smooth(se = FALSE)
 
 ```
 
-Alternative model 1
+Except for a few outliers, the residuals look randomly distributed across the range of the predicted values and around 0. 
+
+
+Alternative model 1:
 
 ```{r}
 model2 <- lm(bwt ~ blength + gaweeks, data = birthwt)
@@ -217,7 +264,9 @@ model2 %>%
   broom::glance()
 ```
 
-Alternative model 2
+In this model, both `blength` and `gaweeks` are significantly and positively associated with birth weight. R2 = 0.5769 and is smaller than the R2 in the previous model, which means compared to that model, model2 is not as well specified as in terms of independent variables.   
+
+Alternative model 2:
 
 ```{r}
 model3 <- lm(bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * babysex + bhead * blength * babysex, data = birthwt)
@@ -226,12 +275,12 @@ model3 %>% broom::tidy()
 
 model3 %>% broom::glance()
 
-
-
 ```
 
+In this model, bhead, blength and babysex are all significantly and positively associated with birth weight. For the interactions, bhead:babysex2 and blength:babysex2 are negatively associated with birth weight. bhead:blength:babysex2 is positively associated with birth weight. bhead:blength is the only variable that is not significant.
 
-cross validation
+
+### Cross validation
 
 ```{r}
 cv_df <- crossv_mc(birthwt, 100) %>% 
@@ -240,7 +289,7 @@ cv_df <- crossv_mc(birthwt, 100) %>%
 
 cv_df <- cv_df %>% 
   mutate(
-    model1 = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + momage + gaweeks + menarche +  mrace + smoken, data = birthwt)),
+    model1 = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + momage + gaweeks + menarche + mrace + smoken, data = birthwt)),
     model2 = map(train, ~lm(bwt ~ blength + gaweeks, data = birthwt)),
     model3 = map(train, ~lm(bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * babysex + bhead * blength * babysex, data = birthwt))
   ) %>% 
@@ -261,7 +310,7 @@ cv_df %>%
 
 ```
 
-
+Overall, model1, which is the model that I proposed, has the least rmse. Compared to the two other models, my model has more independent variables that could explain birth weight, so it's better specified. I think that is why the rmse is lower for this model.
 
 
 
