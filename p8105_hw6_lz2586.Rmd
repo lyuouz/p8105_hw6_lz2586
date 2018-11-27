@@ -9,7 +9,6 @@ output:
 
 ```{r setup, include = FALSE}
 library(tidyverse)
-
 library(modelr)
 ```
 
@@ -34,6 +33,7 @@ homicide <- read_csv('./data/homicide-data.csv') %>%
     victim_race = relevel(victim_race, ref = 'white'),
     victim_sex = fct_relevel(victim_sex, ref = 'Male')
   )
+
 ```
 
 
@@ -44,18 +44,32 @@ homicide <- read_csv('./data/homicide-data.csv') %>%
   + `race_cate`: race categorized as `white` and `non-white`, using `white` as the reference
 * Filtered cities with no race data  
 
+Note that after certain cities were filtered out, there are still "unknown" entries in `victim_sex` and `victim_race`.  
+
+* `victim_race`: included "unknown" in the `non-white` category.  
+* `victim_sex`: I have three options to deal with missing data:  
+  + filter them before the analysis  
+  + randomly assign them `Male` or `Female`  
+  + because we only need the coefficient of non-white compared to white, I can just leave it alone for now 
+
+```{r}
+homicide %>% 
+  filter(victim_sex == 'Unknown')
+```
+
+There are 560 rows whose victim_sex are missing. The dataset has `nrow(homicide)` rows in total, so there are not a lot of missing data points. I'll leave it alone for now, which means I'll be using "Unknown" as a gender category in the regression.
+
 ### Logistic model for Baltimore
 
-A data frame for `Baltimore`
+Filter `homicide` to get the data frame for `Baltimore`
 
 ```{r}
 baltimore <- homicide %>% 
   filter(city == 'Baltimore')
 
-
 ```
 
-logistic model for Baltimore
+logistic model building for Baltimore: using resolved vs. unresolved as the outcome and victim age, sex and race as predictors. 
 
 ```{r}
 
@@ -64,8 +78,10 @@ logistic_baltimore <- baltimore %>%
 
 ```
 
-```{r}
+The output of glm has been saved in `logistic_baltimore`.
 
+```{r}
+# tidy the results for the logistic regression model for Baltimore
 baltimore_results <- logistic_baltimore %>% 
   broom::tidy() %>% 
   mutate(OR = exp(estimate),
@@ -74,13 +90,18 @@ baltimore_results <- logistic_baltimore %>%
          OR_low = exp(conf_low),
          OR_high = exp(conf_high))
 
+# knit into a table
 baltimore_results %>% 
   select(term, log_OR = estimate, OR, OR_low, OR_high) %>% 
   knitr::kable()
 
 ```
 
-For Baltimore, the OR for non-white victim vs. white victim is 0.441. The confidence interval of the adjusted OR is (0.313, 0.620).
+The confidence intervals are computed using `mean + SE*1.96` or `mean - SE*1.96`. For Baltimore, the OR for non-white victim vs. white victim is 0.441. The confidence interval of the adjusted OR is (0.313, 0.620).  
+
+### Logistic regression for all the cities in the dataset
+
+I'm going to write a function that wraps up model building, tidying results and computing OR and confidence intervals.
 
 ```{r}
 
@@ -100,13 +121,21 @@ logistic_function <- function(df){
   
   tidy_results
 }
+```
 
+I'll be using list columns with `nest()` because here `purrr::map` should work with the "sub" datasets for each `city_state`.
+
+```{r}
 homicide_nest <- homicide %>% 
   select(city_state, resolved, victim_age, victim_sex, victim_race) %>% 
   group_by(city_state) %>%
   nest()
+```
 
+Using `map` to apply the function `logistic_function` to each city_state and 
 
+```{r}
+# applying function using map
 homicide_model_results <- homicide_nest %>% 
   mutate(
     logistic_results = map(homicide_nest$data, logistic_function)
@@ -116,7 +145,7 @@ homicide_model_results <- homicide_nest %>%
 
 ```
 
-The plots
+Creating a plot that shows the estimated ORs and CIs for each city:
 
 ```{r}
 
@@ -124,12 +153,12 @@ homicide_model_results %>%
   mutate(city_state = fct_reorder(city_state, OR)) %>% 
   ggplot(aes(x = city_state, y = OR)) + geom_point() +
   geom_errorbar(aes(ymin = OR_low, ymax = OR_high)) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
 
 
 ```
 
-This figure shows that
+This figure shows that the city with the smallest estimated OR is Boston, MA, and the largest OR is in Tampa, FL. There are only two cities whose ORs are larger than 1: Durham, NC and Tampa, FL, which means holding other variables constant, we will see increase in the odds of the victim being non-white vs. the victim being white. However, for most cities, being white will increase the odds of resolving the case. 
 
 ## Problem 2
 
@@ -150,7 +179,10 @@ skimr::skim(birthwt)
 
 Model building: literature shows that factors that impact birth weight include mother's race, mother's age, prenatal care, nutrition and smoking. Smoking is associated with adverse pregnancy outcomes because smoking during pregnancy harms both the mother and the baby. Prenatal smoking is thought to account for 20~30% of cases of low birth weight.
 
-Gestational age, demographic variables should also be controlled for. Considering other biological and social factors that might be indicators or confounders, the variables to be used in the model are: babysex, bhead, blength, delwt, gaweeks, menarche, momage, mrace, pnumlbw, smoken
+Gestational age, demographic variables should also be controlled for. Considering other biological and social factors that might be indicators or confounders, the variables to be used in the model are: babysex, bhead, blength, delwt, gaweeks, menarche, momage, mrace, pnumlbw, smoken  
+
+Also use a correlation heatmap to see what variables are most correlated with birth weight
+
 
 ```{r}
 
@@ -165,9 +197,6 @@ birthlm %>%
 # add predictions and residuals
 birthwt <- modelr::add_residuals(birthwt, birthlm)
 birthwt <- modelr::add_predictions(birthwt, birthlm)
-birthwt <- birthwt %>% 
-  rename(res_1 = resid,
-         pd_1 = pred)
 
 # residuals vs. predictions
 birthwt %>% 
@@ -181,13 +210,56 @@ Alternative model 1
 ```{r}
 model2 <- lm(bwt ~ blength + gaweeks, data = birthwt)
 
-model2 
+model2 %>% 
+  broom::tidy()
+
+model2 %>% 
+  broom::glance()
+```
+
+Alternative model 2
+
+```{r}
+model3 <- lm(bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * babysex + bhead * blength * babysex, data = birthwt)
+
+model3 %>% broom::tidy()
+
+model3 %>% broom::glance()
 
 
 
 ```
 
 
+cross validation
+
+```{r}
+cv_df <- crossv_mc(birthwt, 100) %>% 
+  mutate(train = map(train, as_tibble),
+         test = map(test, as_tibble))
+
+cv_df <- cv_df %>% 
+  mutate(
+    model1 = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + momage + gaweeks + menarche +  mrace + smoken, data = birthwt)),
+    model2 = map(train, ~lm(bwt ~ blength + gaweeks, data = birthwt)),
+    model3 = map(train, ~lm(bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * babysex + bhead * blength * babysex, data = birthwt))
+  ) %>% 
+  mutate(
+    rmse1 = map2_dbl(model1, test, ~rmse(model = .x, data = .y)),
+    rmse2 = map2_dbl(model2, test, ~rmse(model = .x, data = .y)),
+    rmse3 = map2_dbl(model3, test, ~rmse(model = .x, data = .y))
+  )
+
+cv_df %>% 
+  select(starts_with('rmse')) %>% 
+  gather(key = model, value = rmse) %>% 
+  mutate(
+    model = str_replace(model, 'rmse', ''),
+    model = fct_inorder(model)
+  ) %>% 
+  ggplot(aes(x = model, y = rmse)) + geom_violin()
+
+```
 
 
 
